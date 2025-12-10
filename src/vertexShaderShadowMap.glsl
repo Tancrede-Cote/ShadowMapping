@@ -4,8 +4,8 @@
 layout(location=0) in vec3 vPositionModel;
 
 // transformation bringing the scene into light's point of view
-uniform mat4 depthMVP;
+uniform mat4 modelMat, viewMat, projMat;
 
 void main() {
-  gl_Position = depthMVP*vec4(vPositionModel, 1);
+  gl_Position = projMat*viewMat*modelMat*vec4(vPositionModel, 1);
 }

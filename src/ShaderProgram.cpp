@@ -15,9 +15,12 @@ ShaderProgram::~ShaderProgram()
   glDeleteProgram(_id);
 }
 
+#include <filesystem>
+
+
 std::string ShaderProgram::file2String(const std::string &filename)
 {
-  std::ifstream input(filename.c_str());
+  std::ifstream input((filename).c_str());
   if(!input)
     throw std::ios_base::failure("[Shader Program][file2String] Error: cannot open " + filename);
   std::stringstream buffer;

@@ -213,7 +213,7 @@ void loadOFF(const std::string &filename, std::shared_ptr<Mesh> meshPtr)
 {
   std::cout << " > Start loading mesh <" << filename << ">" << std::endl;
   meshPtr->clear();
-  std::ifstream in(filename.c_str());
+  std::ifstream in((filename).c_str());
   if(!in)
     throw std::ios_base::failure("[Mesh Loader][loadOFF] Cannot open " + filename);
   std::string offString;

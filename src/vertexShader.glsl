@@ -6,7 +6,9 @@ layout(location=2) in vec2 vTexCoord;
 
 uniform mat4 modelMat, viewMat, projMat;
 uniform mat3 normMat;
+uniform mat4 lightMat;
 
+out vec4 fragPosLightSpace;
 out vec3 fPositionModel;
 out vec3 fPosition;
 out vec3 fNormal;
@@ -17,6 +19,7 @@ void main() {
   fPosition = (modelMat*vec4(vPosition, 1.0)).xyz;
   fNormal = normMat*vNormal;
   fTexCoord = vTexCoord;
+  fragPosLightSpace = lightMat*modelMat*vec4(vPosition,1.0);
 
   gl_Position =  projMat*viewMat*modelMat*vec4(vPosition, 1.0); // mandatory
 }
