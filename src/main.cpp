@@ -230,8 +230,8 @@ struct Light {
     shader_shadow_map_Ptr->set("viewMat", glm::lookAt(position,scene_center,glm::vec3(0.,0.,1.)));
     // float temp = g_cam->getFov();
     // g_cam->setFoV(scene_radius);
-    //shader_shadow_map_Ptr->set("projMat",glm::ortho());
-    shader_shadow_map_Ptr->set("projMat", g_cam->computeProjectionMatrix()); //version précédente
+    shader_shadow_map_Ptr->set("projMat",glm::ortho(-scene_radius,scene_radius,-scene_radius,scene_radius,-scene_radius,scene_radius));
+    // shader_shadow_map_Ptr->set("projMat", g_cam->computeProjectionMatrix()); //version précédente
     lightMatrix = g_cam->computeProjectionMatrix()*glm::lookAt(position,scene_center,glm::vec3(0.,0.,1.));
     //g_cam->setFoV(temp);
   }
