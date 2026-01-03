@@ -91,6 +91,7 @@ void Mesh::addPlan(float square_half_side)
     glm::uvec3(_vertexPositions.size()-4, _vertexPositions.size()-2, _vertexPositions.size()-1));
 }
 
+#ifdef SUPPORT_OPENGL_45
 void Mesh::init()
 {
   glCreateBuffers(1, &_posVbo); // Generate a GPU buffer to store the positions of the vertices
@@ -126,8 +127,8 @@ void Mesh::init()
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, _ibo);
   glBindVertexArray(0); // Desactive the VAO just created. Will be activated at rendering time.
 }
-
-void Mesh::initOldGL()
+#else
+void Mesh::init()
 {
   // Generate a GPU buffer to store the positions of the vertices
   size_t vertexBufferSize = sizeof(glm::vec3)*_vertexPositions.size();
@@ -172,6 +173,7 @@ void Mesh::initOldGL()
 
   glBindVertexArray(0); // Desactive the VAO just created. Will be activated at rendering time.
 }
+#endif
 
 void Mesh::render()
 {
@@ -213,7 +215,7 @@ void loadOFF(const std::string &filename, std::shared_ptr<Mesh> meshPtr)
 {
   std::cout << " > Start loading mesh <" << filename << ">" << std::endl;
   meshPtr->clear();
-  std::ifstream in((filename).c_str());
+  std::ifstream in(filename.c_str());
   if(!in)
     throw std::ios_base::failure("[Mesh Loader][loadOFF] Cannot open " + filename);
   std::string offString;

@@ -5,7 +5,7 @@
 //      Author: Kiwon Um (originally designed by Tamy Boubekeur)
 //        Mail: kiwon.um@telecom-paris.fr
 //
-// Description: IGR202 - Practical - Shadow (DO NOT distribute!)
+// Description: IGR202 - Practical - Geometry (DO NOT distribute!)
 //
 // http://www.opengl-tutorial.org/intermediate-tutorials/tutorial-16-shadow-mapping/
 //
@@ -21,13 +21,10 @@
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
-
 #include <glm/glm.hpp>
 #include <glm/ext.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
-#include <glm/gtx/string_cast.hpp>
-
 #include <cstdlib>
 #include <cstdio>
 #include <iostream>
@@ -48,7 +45,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
-const std::string DEFAULT_MESH_FILENAME("data/rhino2.off");
+const std::string DEFAULT_MESH_FILENAME("data/monkey.off");
 
 // window parameters
 GLFWwindow *g_window = nullptr;
@@ -72,15 +69,15 @@ float g_appTimer = 0.0;
 float g_appTimerLastColckTime;
 bool g_appTimerStoppedP = true;
 
-// TODO: textures
+// textures
 unsigned int g_availableTextureSlot = 0;
 
-static GLuint normalMapID;
-static GLuint wallTexID;
-static GLuint shadowMapID[3];
-
-glm::mat4 lightMatrix;
-
+int g_albedoTexLoaded = 0;
+GLuint g_albedoTex;
+unsigned int g_albedoTexOnGPU;
+int g_normalTexLoaded = 0;
+GLuint g_normalTex;
+unsigned int g_normalTexOnGPU;
 
 GLuint loadTextureFromFileToGPU(const std::string &filename)
 {
@@ -92,11 +89,9 @@ GLuint loadTextureFromFileToGPU(const std::string &filename)
     &height,
     &numComponents, // 1 for a 8 bit greyscale image, 3 for 24bits RGB image, 4 for 32bits RGBA image
     0);
-
   // Create a texture in GPU memory
   GLuint texID;
   glGenTextures(1, &texID);
-  glActiveTexture(GL_TEXTURE0+g_availableTextureSlot++);
   glBindTexture(GL_TEXTURE_2D, texID);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
@@ -113,201 +108,49 @@ GLuint loadTextureFromFileToGPU(const std::string &filename)
     (numComponents == 1 ? GL_RED : numComponents == 3 ? GL_RGB : GL_RGBA), // For greyscale images, we store them in the RED channel
     GL_UNSIGNED_BYTE,
     data);
-
   // Generating mipmaps for filtered texture fetch
   glGenerateMipmap(GL_TEXTURE_2D);
-
   // Freeing the now useless CPU memory
   stbi_image_free(data);
   glBindTexture(GL_TEXTURE_2D, 0); // unbind the texture
   return texID;
 }
 
-class FboShadowMap {
-public:
-  GLuint getTextureId() const { return _depthMapTexture; }
-
-  bool allocate(unsigned int width=1024, unsigned int height=768)
-  {
-    glGenFramebuffers(1, &_depthMapFbo);
-    glBindFramebuffer(GL_FRAMEBUFFER, _depthMapFbo);
-
-    _depthMapTextureWidth = width;
-    _depthMapTextureHeight = height;
-
-    // Depth texture. Slower than a depth buffer, but you can sample it later in your shader
-    glGenTextures(1, &_depthMapTexture);
-    glBindTexture(GL_TEXTURE_2D, _depthMapTexture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT16, width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, 0);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-
-    glFramebufferTexture(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, _depthMapTexture, 0);
-
-    glDrawBuffer(GL_NONE);      // No color buffers are written.
-
-    if(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) {
-      glBindFramebuffer(GL_FRAMEBUFFER, 0);
-      return true;
-    } else {
-      std::cout << "PROBLEM IN FBO FboShadowMap::allocate(): FBO NOT successfully created" << std::endl;
-      glBindFramebuffer(GL_FRAMEBUFFER, 0);
-      return false;
-    }
-  }
-
-  void bindFbo()
-  {
-    glViewport(0, 0, _depthMapTextureWidth, _depthMapTextureHeight);
-    glBindFramebuffer(GL_FRAMEBUFFER, _depthMapFbo);
-    glDrawBuffer(GL_COLOR_ATTACHMENT0);
-    glClear(GL_DEPTH_BUFFER_BIT);
-
-    // you can now render the geometry, assuming you have set the view matrix
-    // according to the light viewpoint
-  }
-
-  void free() { glDeleteFramebuffers(1, &_depthMapFbo); }
-
-  void savePpmFile(std::string const &filename)
-  {
-    std::ofstream output_image(filename.c_str());
-
-    // READ THE PIXELS VALUES from FBO AND SAVE TO A .PPM FILE
-    int i, j, k;
-    float *pixels = new float[_depthMapTextureWidth*_depthMapTextureHeight];
-
-    // READ THE CONTENT FROM THE FBO
-    glReadBuffer(GL_COLOR_ATTACHMENT0);
-    glReadPixels(0, 0, _depthMapTextureWidth, _depthMapTextureHeight, GL_DEPTH_COMPONENT , GL_FLOAT, pixels);
-
-    output_image << "P3" << std::endl;
-    output_image << _depthMapTextureWidth << " " << _depthMapTextureHeight << std::endl;
-    output_image << "255" << std::endl;
-
-    k = 0;
-    for(i=0; i<_depthMapTextureWidth; ++i) {
-      for(j=0; j<_depthMapTextureHeight; ++j) {
-        // std::cout<<pixels[k]<<std::endl;
-        pixels[k] = pixels[k]*100-99 > 0.5 ? 1. : pixels[k]*100-99;
-        output_image <<
-          static_cast<unsigned int>(255*pixels[k]) << " " <<
-          static_cast<unsigned int>(255*pixels[k]) << " " <<
-          static_cast<unsigned int>(255*pixels[k]) << " ";
-        k = k+1;
-      }
-      output_image << std::endl;
-    }
-    delete [] pixels;
-    output_image.close();
-  }
-
-private:
-  GLuint _depthMapFbo;
-  GLuint _depthMapTexture;
-  unsigned int _depthMapTextureWidth;
-  unsigned int _depthMapTextureHeight;
-};
-
-
 struct Light {
-  FboShadowMap shadowMap;
   glm::mat4 depthMVP;
-  unsigned int shadowMapTexOnGPU;
-
   glm::vec3 position;
   glm::vec3 color;
   float intensity;
-
-  void setupCameraForShadowMapping(
-    std::shared_ptr<ShaderProgram> shader_shadow_map_Ptr,
-    const glm::vec3 scene_center,
-    const float scene_radius)
-  {
-    // TODO: compute the MVP matrix from the light's point of view
-    shader_shadow_map_Ptr->set("viewMat", glm::lookAt(position,scene_center,glm::vec3(0.,0.,1.)));
-    // float temp = g_cam->getFov();
-    // g_cam->setFoV(scene_radius);
-    shader_shadow_map_Ptr->set("projMat",glm::ortho(-scene_radius,scene_radius,-scene_radius,scene_radius,-scene_radius,scene_radius));
-    // shader_shadow_map_Ptr->set("projMat", g_cam->computeProjectionMatrix()); //version précédente
-    lightMatrix = g_cam->computeProjectionMatrix()*glm::lookAt(position,scene_center,glm::vec3(0.,0.,1.));
-    //g_cam->setFoV(temp);
-  }
-
-  void allocateShadowMapFbo(unsigned int w=800, unsigned int h=600)
-  {
-    shadowMap.allocate(w, h);
-  }
-  void bindShadowMap()
-  {
-    shadowMap.bindFbo();
-  }
 };
-
 
 struct Scene {
   std::vector<Light> lights;
-
   // meshes
   std::shared_ptr<Mesh> rhino = nullptr;
   std::shared_ptr<Mesh> plane = nullptr;
-
   // transformation matrices
   glm::mat4 rhinoMat = glm::mat4(1.0);
   glm::mat4 planeMat = glm::mat4(1.0);
   glm::mat4 floorMat = glm::mat4(1.0);
-
   glm::vec3 scene_center = glm::vec3(0);
   float scene_radius = 1.f;
-
-  // shaders to render the meshes and shadow maps
-  std::shared_ptr<ShaderProgram> mainShader, shadowMapShader;
-
+  // shaders to render the meshes
+  std::shared_ptr<ShaderProgram> mainShader;
   // useful for debug
-  bool saveShadowMapsPpm = false;
 
   void render()
   {
-
-    //<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-    // TODO: first, render the shadow maps
     glEnable(GL_CULL_FACE);
-    shadowMapShader->use();
-
-    for(int i=0; i<lights.size(); ++i) {
-      Light &light = lights[i];
-      light.setupCameraForShadowMapping(shadowMapShader, scene_center, scene_radius*1.5f);
-      light.bindShadowMap();
-
-      // TODO: render the objects in the scene
-      shadowMapShader->set("modelMat", rhinoMat);
-      rhino->render();
-
-      if(saveShadowMapsPpm) {
-        light.shadowMap.savePpmFile(std::string("shadow_map_")+std::to_string(i)+std::string(".ppm"));
-      }
-    }
-    shadowMapShader->stop();
-    saveShadowMapsPpm = false;
-    //>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-    //<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-    // TODO: second, render the scene
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, g_windowWidth, g_windowHeight);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); // Erase the color and z buffers.
+    //glDisable(GL_CULL_FACE);    // or
     glCullFace(GL_BACK);
-
     mainShader->use();
-
     // camera
     mainShader->set("camPos", g_cam->getPosition());
     mainShader->set("viewMat", g_cam->computeViewMatrix());
     mainShader->set("projMat", g_cam->computeProjectionMatrix());
-    mainShader->set("lightMat", lightMatrix);
-
     // lights
     for(int i=0; i<lights.size(); ++i) {
       Light &light = lights[i];
@@ -316,44 +159,19 @@ struct Scene {
       mainShader->set(std::string("lightSources[")+std::to_string(i)+std::string("].intensity"), light.intensity);
       mainShader->set(std::string("lightSources[")+std::to_string(i)+std::string("].isActive"), 1);
     }
-
     mainShader->set("material.albedo", glm::vec3(1, 0.71, 0.29));
+    mainShader->set("material.albedoTexLoaded", 0);
+    mainShader->set("material.normalTexLoaded", 0);
     mainShader->set("modelMat", rhinoMat);
     mainShader->set("normMat", glm::mat3(glm::inverseTranspose(rhinoMat)));
     rhino->render();
-
-    for(int i=0; i<lights.size(); ++i) {
-      glActiveTexture(GL_TEXTURE0 + shadowMapID[i] + 1);
-      glBindTexture(GL_TEXTURE_2D, shadowMapID[i]);
-      mainShader->set(std::string("shadowMaps[")+std::to_string(i)+std::string("]"), static_cast<int>(shadowMapID[i]));
-    }
-
-    // back-wall
-    mainShader->set("useShadow",1);
-    mainShader->set("material.albedo", glm::vec3(0.29, 0.51, 0.82)); // default value if the texture was not loaded
-    mainShader->set("modelMat", planeMat);
-    mainShader->set("normMat", glm::mat3(glm::inverseTranspose(planeMat)));
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, normalMapID);
-    mainShader->set("material.normalMap", 0);
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, wallTexID);
-    mainShader->set("material.texture", 1);
-    mainShader->set("isNormalMap",1);
-    plane->render();
-    // glBindTexture(GL_TEXTURE_2D,0);
-    mainShader->set("isNormalMap",0);
-
-    // floor
-    mainShader->set("material.albedo", glm::vec3(0.8, 0.8, 0.9));
-    mainShader->set("modelMat", floorMat);
-    mainShader->set("normMat", glm::mat3(glm::inverseTranspose(floorMat)));
-    plane->render();
-    mainShader->set("useShadow",0);
-
-
     mainShader->stop();
     //>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+  }
+
+  void subdivideCenterMesh() {
+    rhino->subdivideLoop();
+    rhino->init();
   }
 };
 
@@ -370,7 +188,6 @@ void printHelp()
     "    Keyboard commands:" << std::endl <<
     "    * H: print this help" << std::endl <<
     "    * T: toggle animation" << std::endl <<
-    "    * S: save shadow maps into PPM files" << std::endl <<
     "    * F1: toggle wireframe/surface rendering" << std::endl <<
     "    * ESC: quit the program" << std::endl;
 }
@@ -389,8 +206,8 @@ void keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods
 {
   if(action == GLFW_PRESS && key == GLFW_KEY_H) {
     printHelp();
-  } else if(action == GLFW_PRESS && key == GLFW_KEY_S) {
-    g_scene.saveShadowMapsPpm = true;
+  } else if(action == GLFW_PRESS && key == GLFW_KEY_L) {
+    g_scene.subdivideCenterMesh();
   } else if(action == GLFW_PRESS && key == GLFW_KEY_T) {
     g_appTimerStoppedP = !g_appTimerStoppedP;
     if(!g_appTimerStoppedP)
@@ -461,26 +278,27 @@ void initGLFW()
   }
 
   // Before creating the window, set some option flags
+#ifdef SUPPORT_OPENGL_45
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
+#else
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+#endif
   glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_RESIZABLE, GL_TRUE);
-
   // Create the window
-  g_window = glfwCreateWindow(g_windowWidth, g_windowHeight, "IGR202 - Practical - Shadow", nullptr, nullptr);
+  g_window = glfwCreateWindow(g_windowWidth, g_windowHeight, "IGR202 - TP - Subdivision Surfaces", nullptr, nullptr);
   if(!g_window) {
     std::cerr << "ERROR: Failed to open window" << std::endl;
     glfwTerminate();
     std::exit(EXIT_FAILURE);
   }
-
   // Load the OpenGL context in the GLFW window using GLAD OpenGL wrangler
   glfwMakeContextCurrent(g_window);
-
   // not mandatory for all, but MacOS X
   glfwGetFramebufferSize(g_window, &g_windowWidth, &g_windowHeight);
-
   // Connect the callbacks for interactive control
   glfwSetWindowSizeCallback(g_window, windowSizeCallback);
   glfwSetKeyCallback(g_window, keyCallback);
@@ -503,29 +321,21 @@ void initOpenGL()
   // Load extensions for modern OpenGL
   if(!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
     exitOnCriticalError("[Failed to initialize OpenGL context]");
-
+#ifdef SUPPORT_OPENGL_45
+  // supported from 4.3
   glEnable(GL_DEBUG_OUTPUT);    // Modern error callback functionality
   glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS); // For recovering the line where the error occurs, set a debugger breakpoint in DebugMessageCallback
   glDebugMessageCallback(debugMessageCallback, 0); // Specifies the function to call when an error message is generated.
-
+#endif
   glCullFace(GL_BACK); // Specifies the faces to cull (here the ones pointing away from the camera)
   glEnable(GL_CULL_FACE); // Enables face culling (based on the orientation defined by the CW/CCW enumeration).
   glDepthFunc(GL_LESS);   // Specify the depth test for the z-buffer
   glEnable(GL_DEPTH_TEST);      // Enable the z-buffer test in the rasterization
   glClearColor(1.0f, 1.0f, 1.0f, 1.0f); // specify the background color, used any time the framebuffer is cleared
-
   // Loads and compile the programmable shader pipeline
   try {
     g_scene.mainShader = ShaderProgram::genBasicShaderProgram("src/vertexShader.glsl", "src/fragmentShader.glsl");
     g_scene.mainShader->stop();
-
-  } catch(std::exception &e) {
-    exitOnCriticalError(std::string("[Error loading shader program]") + e.what());
-  }
-  try {
-    g_scene.shadowMapShader = ShaderProgram::genBasicShaderProgram("src/vertexShaderShadowMap.glsl", "src/fragmentShaderShadowMap.glsl");
-    g_scene.shadowMapShader->stop();
-
   } catch(std::exception &e) {
     exitOnCriticalError(std::string("[Error loading shader program]") + e.what());
   }
@@ -538,7 +348,6 @@ void initScene(const std::string &meshFilename)
   glfwGetWindowSize(g_window, &width, &height);
   g_cam = std::make_shared<Camera>();
   g_cam->setAspectRatio(static_cast<float>(width)/static_cast<float>(height));
-
   // Load meshes in the scene
   {
     g_scene.rhino = std::make_shared<Mesh>();
@@ -548,7 +357,6 @@ void initScene(const std::string &meshFilename)
       exitOnCriticalError(std::string("[Error loading mesh]") + e.what());
     }
     g_scene.rhino->init();
-
     g_scene.plane = std::make_shared<Mesh>();
     g_scene.plane->addPlan();
     g_scene.plane->init();
@@ -556,11 +364,6 @@ void initScene(const std::string &meshFilename)
     g_scene.floorMat = glm::translate(glm::mat4(1.0), glm::vec3(0, -1.0, 0))*
       glm::rotate(glm::mat4(1.0), (float)(-0.5f*M_PI), glm::vec3(1.0, 0.0, 0.0));
   }
-
-  // TODO: Load and setup textures
-  normalMapID = loadTextureFromFileToGPU("data/normal.png");
-  wallTexID = loadTextureFromFileToGPU("data/color.png");
-
   // Setup lights
   const glm::vec3 pos[3] = {
     glm::vec3(0.0, 1.0, 1.0),
@@ -572,21 +375,14 @@ void initScene(const std::string &meshFilename)
     glm::vec3(1.0, 1.0, 0.8),
     glm::vec3(1.0, 1.0, 0.8),
   };
-  unsigned int shadow_map_width=2000, shadow_map_height=2000; // play with these parameters
   for(int i=0; i<3; ++i) {
     g_scene.lights.push_back(Light());
-    Light &a_light = g_scene.lights[i];
+    Light &a_light = g_scene.lights[g_scene.lights.size() - 1];
     a_light.position = pos[i];
     a_light.color = col[i];
     a_light.intensity = 0.5f;
-    a_light.shadowMapTexOnGPU = g_availableTextureSlot;
-    glActiveTexture(GL_TEXTURE0 + a_light.shadowMapTexOnGPU);
-    a_light.allocateShadowMapFbo(shadow_map_width, shadow_map_height);
     ++g_availableTextureSlot;
-    //shadowMapID[i] = a_light.shadowMap.getTextureId();
-    shadowMapID[i] = a_light.shadowMapTexOnGPU;
   }
-
   // Adjust the camera to the mesh
   glm::vec3 meshCenter;
   float meshRadius;
@@ -612,7 +408,6 @@ void clear()
   g_scene.rhino.reset();
   g_scene.plane.reset();
   g_scene.mainShader.reset();
-  g_scene.shadowMapShader.reset();
   glfwDestroyWindow(g_window);
   glfwTerminate();
 }
@@ -632,7 +427,6 @@ void update(float currentTime)
     g_appTimerLastColckTime = currentTime;
     g_appTimer += dt;
     // <---- Update here what needs to be animated over time ---->
-
     g_scene.rhinoMat = glm::rotate(glm::mat4(1.f), (float)g_appTimer, glm::vec3(0.f, 1.f, 0.f));
   }
 }
