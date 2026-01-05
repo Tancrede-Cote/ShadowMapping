@@ -10,6 +10,8 @@
 
 #include <map>
 #include <set>
+#include <iostream>
+#include <algorithm>
 
 class Mesh {
 public:
@@ -149,20 +151,62 @@ public:
     
     // II) Then, compute the positions for the even vertices: (make sure that you handle the boundaries correctly)
     for(unsigned int v = 0 ; v < _vertexPositions.size() ; ++v) {
+      std::set<unsigned int>::iterator it = (neighboringVertices[v]).begin();
+      unsigned int neighbor = *it;
+      unsigned int initial_neighbor = *it;
+      unsigned int previous_neighbor = -1;
+      std::set<unsigned int>::iterator face = trianglesOnEdge[Edge(v,neighbor)].begin();
+      bool temp = false;
+      while(++it != (neighboringVertices[v]).end()){
+        std::set<unsigned int>::iterator it3 = (neighboringVertices[v]).begin();
+        while(it3!=(neighboringVertices[v]).end()){
+          std::set<unsigned int>::iterator it2 = (neighboringVertices[neighbor]).begin();
+          while(it2!=(neighboringVertices[neighbor]).end()){
+            if(*it2==*it3 && *it2!=previous_neighbor){
+              previous_neighbor=neighbor;
+              neighbor=*it2;
+              temp=true;
+              break;
+            }
+            it2++;
+          }
+          if(initial_neighbor==neighbor&&temp){
+            break;
+          }
+          it3++;
+        }
+        if(initial_neighbor==neighbor&&temp){
+          break;
+        }
+      }
+      evenVertexIsBoundary[v] = !(initial_neighbor==neighbor);
+      
+//TODO: Compute the coordinates for even vertices - check both the cases - ordinary and extraordinary
+    }
+
+    for (unsigned int v=0; v < _vertexPositions.size() ; ++v){
       glm::vec3 sumOfNeighbors(0.,0.,0.);
       std::set<unsigned int>::iterator it = (neighboringVertices[v]).begin();
-      while(it != (neighboringVertices[v]).end()){
-        sumOfNeighbors += _vertexPositions[*it];
-        it++;
+      if (!evenVertexIsBoundary[v]){
+        while(it != (neighboringVertices[v]).end()){
+          sumOfNeighbors += _vertexPositions[*it];
+          it++;
+        }
+      } else{
+        while(it != (neighboringVertices[v]).end()){
+          if (evenVertexIsBoundary[*it]){
+            sumOfNeighbors += _vertexPositions[*it];
+          }
+          it++;
+        }
       }
       int k = evenVertexValence[v];
-      if (k == 2){ // boundary
+      if (evenVertexIsBoundary[v]){ // boundary
         newVertices[v] = (1.f/8.f)*sumOfNeighbors+(3.f/4.f)*_vertexPositions[v];
       } else { // interior
-        float beta = 3.f/(8.f*k);
+        float beta = (k==3)?3.f/(16.f):3.f/(8.f*k);
         newVertices[v] = (1.f-k*beta)*_vertexPositions[v]+beta*sumOfNeighbors;
       }
-//TODO: Compute the coordinates for even vertices - check both the cases - ordinary and extraordinary
     }
 
 
@@ -174,17 +218,19 @@ public:
 
 
       Edge Eab(a,b);
+      bool test = false;
       unsigned int oddVertexOnEdgeEab = 0;
       if( newVertexOnEdge.find( Eab ) == newVertexOnEdge.end() ) {
         newVertices.push_back( glm::vec3(0,0,0) );
         oddVertexOnEdgeEab = newVertices.size() - 1;
         newVertexOnEdge[Eab] = oddVertexOnEdgeEab;
+        test = true;
       }
       else { oddVertexOnEdgeEab = newVertexOnEdge[Eab]; }
 
 //TODO: Update odd vertices
-      if (trianglesOnEdge[Eab].empty()){// boundary
-        newVertices[oddVertexOnEdgeEab] = (1.f/2.f)*(_vertexPositions[Eab.a]+_vertexPositions[Eab.b]);
+      if (evenVertexIsBoundary[a]&&evenVertexIsBoundary[b]){// boundary
+        newVertices[oddVertexOnEdgeEab] = (1.f/2.f)*(_vertexPositions[a]+_vertexPositions[b]);
       } else {// interior
         glm::vec3 sumOfNeighbors(0.,0.,0.);
         std::set<unsigned int>::iterator it = (trianglesOnEdge[Eab]).begin();
@@ -192,23 +238,25 @@ public:
           sumOfNeighbors += _vertexPositions[*it];
           it++;
         }
-        newVertices[oddVertexOnEdgeEab] = (3.f/8.f)*(_vertexPositions[Eab.a]+_vertexPositions[Eab.b]) + (1.f/8.f)*sumOfNeighbors;
+        newVertices[oddVertexOnEdgeEab] = (3.f/8.f)*(_vertexPositions[a]+_vertexPositions[b]) + (1.f/8.f)*sumOfNeighbors;
       }
       
 
 
       Edge Ebc(b,c);
+      test = false;
       unsigned int oddVertexOnEdgeEbc = 0;
       if( newVertexOnEdge.find( Ebc ) == newVertexOnEdge.end() ) {
         newVertices.push_back( glm::vec3(0,0,0) );
         oddVertexOnEdgeEbc = newVertices.size() - 1;
         newVertexOnEdge[Ebc] = oddVertexOnEdgeEbc;
+        test = true;
       }
-      else { oddVertexOnEdgeEbc = newVertexOnEdge[Ebc]; }
+      else { oddVertexOnEdgeEbc = newVertexOnEdge[Ebc];}
 
 //TODO: Update odd vertices
-      if (trianglesOnEdge[Ebc].empty()){// boundary
-        newVertices[oddVertexOnEdgeEbc] = (1.f/2.f)*(_vertexPositions[Ebc.a]+_vertexPositions[Ebc.b]);
+      if (evenVertexIsBoundary[b]&&evenVertexIsBoundary[c]){// boundary
+        newVertices[oddVertexOnEdgeEbc] = (1.f/2.f)*(_vertexPositions[b]+_vertexPositions[c]);
       } else {// interior
         glm::vec3 sumOfNeighbors(0.,0.,0.);
         std::set<unsigned int>::iterator it = (trianglesOnEdge[Ebc]).begin();
@@ -216,22 +264,24 @@ public:
           sumOfNeighbors += _vertexPositions[*it];
           it++;
         }
-        newVertices[oddVertexOnEdgeEbc] = (3.f/8.f)*(_vertexPositions[Ebc.a]+_vertexPositions[Ebc.b]) + (1.f/8.f)*sumOfNeighbors;
+        newVertices[oddVertexOnEdgeEbc] = (3.f/8.f)*(_vertexPositions[b]+_vertexPositions[c]) + (1.f/8.f)*sumOfNeighbors;
       }
 
 
       Edge Eca(c,a);
+      test = false;
       unsigned int oddVertexOnEdgeEca = 0;
       if( newVertexOnEdge.find( Eca ) == newVertexOnEdge.end() ) {
         newVertices.push_back( glm::vec3(0,0,0) );
         oddVertexOnEdgeEca = newVertices.size() - 1;
         newVertexOnEdge[Eca] = oddVertexOnEdgeEca;
+        test = true;
       }
       else { oddVertexOnEdgeEca = newVertexOnEdge[Eca]; }
 
 //TODO: Update odd vertices
-      if (trianglesOnEdge[Eca].empty()){// boundary
-        newVertices[oddVertexOnEdgeEca] = (1.f/2.f)*(_vertexPositions[Eca.a]+_vertexPositions[Eca.b]);
+      if (evenVertexIsBoundary[a]&&evenVertexIsBoundary[c]){// boundary
+        newVertices[oddVertexOnEdgeEca] = (1.f/2.f)*(_vertexPositions[a]+_vertexPositions[c]);
       } else {// interior
         glm::vec3 sumOfNeighbors(0.,0.,0.);
         std::set<unsigned int>::iterator it = (trianglesOnEdge[Eca]).begin();
@@ -239,7 +289,7 @@ public:
           sumOfNeighbors += _vertexPositions[*it];
           it++;
         }
-        newVertices[oddVertexOnEdgeEca] = (3.f/8.f)*(_vertexPositions[Eca.a]+_vertexPositions[Eca.b]) + (1.f/8.f)*sumOfNeighbors;
+        newVertices[oddVertexOnEdgeEca] = (3.f/8.f)*(_vertexPositions[a]+_vertexPositions[c]) + (1.f/8.f)*sumOfNeighbors;
       }
 
 
@@ -263,7 +313,6 @@ public:
 
 
   void subdivideLoop() {
-    // subdivideLinear();
     subdivideLoopNew();
     // TODO: Implement here the Loop subdivision instead of the straightforward Linear Subdivision.
     // You can have a look at the Linear Subdivision function to take some inspiration from it.
